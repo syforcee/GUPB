@@ -3,6 +3,7 @@ from gupb.controller import random
 from gupb.controller import claret_wolf
 
 KEYBOARD_CONTROLLER = keyboard.KeyboardController()
+CLARET_WOLF = claret_wolf.ClaretWolfController()
 
 CONFIGURATION = {
     'arenas': [
@@ -10,12 +11,12 @@ CONFIGURATION = {
     ],
     'controllers': [
         KEYBOARD_CONTROLLER,
-        claret_wolf.ClaretWolfController(),
+        CLARET_WOLF,
         random.RandomController("Alice"),
         random.RandomController("Bob"),
         random.RandomController("Cecilia"),
     ],
     'visualise': True,
-    'show_sight': KEYBOARD_CONTROLLER,
+    'show_sight': CLARET_WOLF,
     'runs_no': 1,
 }
