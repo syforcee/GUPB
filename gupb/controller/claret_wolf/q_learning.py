@@ -3,13 +3,22 @@ from collections import defaultdict
 from enum import Enum
 
 # Potencjalne stany:
+
+# Wektor:
+# - dystans od mgły:
 # brak mgły
 # Daleko -> 10+ i kierunek
 # Blisko -> <10 i kierunek
+# - bool: czy w zasięgu jest lepsza broń
+# - bool, czy da się atakowąc
+# - bool, czy da się ścigać przeciwnika
 
 # Akcje:
 # uciekaj
 # zostań
+# zabierz broń
+# zaaatakuj
+# scigaj
 
 class MistDistance(Enum):
     NO_MIST = 1,
@@ -18,7 +27,9 @@ class MistDistance(Enum):
 
 class QAction(Enum):
     RUN_AWAY = 1,
-    IGNORE = 2
+    ATTACK = 2,
+    CHASE = 3,
+    FIND_WEAPON = 4
   
 # mapa: (stan, akcja) -> nagroda
 q_values = defaultdict(int)
@@ -41,7 +52,7 @@ def learn_actions(state):
         """
         Explore: select a random action
         """
-        action = random.choice([QAction.RUN_AWAY, QAction.IGNORE])
+        action = random.choice([QAction.RUN_AWAY, QAction.ATTACK, QAction.CHASE, QAction.FIND_WEAPON])
         return (state, action)
     else:
         """
@@ -54,7 +65,7 @@ def learn_actions(state):
 def update_q_values(old_state, action, reward, new_state):
     q_values[(old_state, action)] = q_values[(old_state, action)] + learning_rate * (reward + gamma * q_values[(new_state, get_max_reward_action(new_state))] - q_values[(old_state, action)])
 
-def calculate_state(mist_vec):
+def calculate_mnist_state(mist_vec):
 
     g_distance_vec = lambda vec: ((vec[0]) ** 2 + (vec[1]) ** 2)
 

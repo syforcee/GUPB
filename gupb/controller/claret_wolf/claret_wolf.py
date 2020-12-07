@@ -16,7 +16,7 @@ from pathfinding.core.diagonal_movement import DiagonalMovement
 from pathfinding.core.grid import Grid
 from pathfinding.finder.a_star import AStarFinder
 
-from .q_learning import calculate_state, choose_action, learn_actions, QAction, update_q_values, get_table
+from .q_learning import calculate_mnist_state, choose_action, learn_actions, QAction, update_q_values, get_table
 
 class Move(Enum):
     UP = coordinates.Coords(0, -1)
@@ -195,24 +195,23 @@ class ClaretWolfController:
 
     def choose_next_step(self, knowledge: characters.ChampionKnowledge) -> None:
 
-        # can we attack?
-        if self.can_attack(knowledge):
-            self.queue =[]
-            self.queue.append(characters.Action.ATTACK)
-            return
+        # Calculate new state
+        self.find_vector_to_nearest_mist_tile(knowledge)
+        mist_value = calculate_mnist_state(self.last_observed_mist_vec)
+        can_attack = bool(self.can_attack(knowledge))
+        better_weapon_nearby = bool(self.determine_next_weapon())
+        enemy_nearby = bool(self.check_enemies_in_neighbourhood())
+        state = [mist_value, can_attack, better_weapon_nearby, enemy_nearby]
+        print("prepared_state: ")
+        print(state)
 
         #Choose action based on Q learning
-        self.find_vector_to_nearest_mist_tile(knowledge)
-        state = calculate_state(self.last_observed_mist_vec)
         (state, action) = learn_actions(state)
-
-        # print(state)
-        # print(action)
-
+        print(action)
         #Update
         if self.last_round_health is not None and self.q_learning_state is not None:
 
-            # print("Updating q values")
+            print("Updating q values")
 
             (old_state, old_action) = self.q_learning_state
             reward = 0
@@ -220,9 +219,8 @@ class ClaretWolfController:
                 reward += 0.5
             else:
                 reward += -50
-            # print(reward)
-            if old_action == QAction.RUN_AWAY:
-                reward+=-1
+            # if old_action == QAction.RUN_AWAY:
+            #     reward+=-1
             update_q_values(old_state, old_action, reward, state)
 
         self.q_learning_state = (state, action)
@@ -234,21 +232,20 @@ class ClaretWolfController:
             if next:
                 self.enqueue_target(next)
                 return 
-        # elif action == QAction.IGNORE:
+
+        # # maybe look for new weapon?
+        # next = self.determine_next_weapon()
+        # print(next)
+        # if next:
+        #     self.queue = []
+        #     self.enqueue_target(next)
         #     return
 
-        # maybe look for new weapon?
-        next = self.determine_next_weapon()
-        if next:
-            self.queue = []
-            self.enqueue_target(next)
-            return
-
-        # maybe chase?
-        next = self.check_enemies_in_neighbourhood()
-        if next:
-            self.queue = []
-            self.enqueue_target(next)
+        # # maybe chase?
+        # next = self.check_enemies_in_neighbourhood()
+        # if next:
+        #     self.queue = []
+        #     self.enqueue_target(next)
 
         # maybe explore DEFAULT
 
