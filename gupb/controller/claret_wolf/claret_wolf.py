@@ -16,7 +16,7 @@ from pathfinding.core.diagonal_movement import DiagonalMovement
 from pathfinding.core.grid import Grid
 from pathfinding.finder.a_star import AStarFinder
 
-from .q_learning import calculate_state, choose_action, learn_actions, QAction, update_q_values, get_table
+from .q_learning import determine_state, choose_action, learn_actions, QAction, QState, MistDistance, MistDirection, update_q_values, get_table, q_values
 
 class Move(Enum):
     UP = coordinates.Coords(0, -1)
@@ -96,11 +96,15 @@ class ClaretWolfController:
         self.round_health = None
         self.is_bot_in_rotation = False
         self.q_learning_state = None
+        self.q_values: Dict[(QState, QAction)] = defaultdict(int) # use after learning
+        self.in_learning = True
         self.mapping_on_actions: dict[Move, characters.Action] = {Move.UP: characters.Action.STEP_FORWARD,
                                                                   Move.LEFT: characters.Action.TURN_LEFT,
                                                                   Move.RIGHT: characters.Action.TURN_RIGHT,
                                                                   Move.DO_NOTHING: characters.Action.ATTACK,
                                                                   }
+
+        self.read_learned_q_values() # only after learning
 
     def __eq__(self, other: object) -> bool:
         if isinstance(other, ClaretWolfController):
@@ -115,6 +119,9 @@ class ClaretWolfController:
     def reset(self, arena_description: arenas.ArenaDescription) -> None:
         self.menhir_position = arena_description.menhir_position
         self.init_enviroment_map(arena_description.name)
+        self.last_observed_mist_vec = None
+        #print("::q_values = ", self.q_learning_state)
+        #print("::q_values = ", self.q_values) # self.q_values
         # print(get_table())
 
 
@@ -160,7 +167,7 @@ class ClaretWolfController:
                 # print("PERFORMING DEAFULT MOVE")
                 return self.explore_map()
         except Exception as e:
-            # print("EXCEPTION CAUSE = ", e)
+            #print("EXCEPTION CAUSE = ", e)
             return Action.DO_NOTHING
             pass
 
@@ -188,6 +195,15 @@ class ClaretWolfController:
         target_position = self.enemies_knowledge[closest_alive_enemy][1] if closest_alive_enemy is not None else None #coord
         return target_position
 
+    def get_best_action_in_state(self, curr_state):
+        max_value = -1000
+        chosen_action = None
+        for (state, action), value in self.q_values.items():
+            if state == curr_state and value > max_value:
+                max_value = value
+                chosen_action = action
+
+        return chosen_action
 
     def has_next_defined(self):
         return len(self.queue) > 0
@@ -197,35 +213,44 @@ class ClaretWolfController:
 
         # can we attack?
         if self.can_attack(knowledge):
-            self.queue =[]
+            self.queue = []
             self.queue.append(characters.Action.ATTACK)
             return
 
         #Choose action based on Q learning
         self.find_vector_to_nearest_mist_tile(knowledge)
-        state = calculate_state(self.last_observed_mist_vec)
-        (state, action) = learn_actions(state)
+        state = determine_state(self.last_observed_mist_vec, self.facing)
+        #print("RPY STATE = ", state)
+        if self.in_learning:
+            (state, action) = learn_actions(state)
 
-        # print(state)
-        # print(action)
+            # print(state)
+            # print(action)
 
-        #Update
-        if self.last_round_health is not None and self.q_learning_state is not None:
+            #Update
+            if self.last_round_health is not None and self.q_learning_state is not None:
 
-            # print("Updating q values")
+                # print("Updating q values")
 
-            (old_state, old_action) = self.q_learning_state
-            reward = 0
-            if self.last_round_health == self.round_health:
-                reward += 0.5
+                (old_state, old_action) = self.q_learning_state
+                reward = 0
+                if self.last_round_health == self.round_health:
+                    reward += 0.5
+                else:
+                    reward += -50
+                # print(reward)
+                if old_action == QAction.RUN_AWAY and old_state.mist_distance == MistDistance.NO_MIST:
+                    reward += -40
+                update_q_values(old_state, old_action, reward, state)
+
+            self.q_learning_state = (state, action)
+
+        else: # for battle only
+            if random.uniform(0, 1) < epsilon:
+                action = random.choice([QAction.RUN_AWAY, QAction.IGNORE])
             else:
-                reward += -50
-            # print(reward)
-            if old_action == QAction.RUN_AWAY:
-                reward+=-1
-            update_q_values(old_state, old_action, reward, state)
+                action = self.get_best_action_in_state(state)
 
-        self.q_learning_state = (state, action)
 
         # Perform chosen action
         if action == QAction.RUN_AWAY:
@@ -236,6 +261,7 @@ class ClaretWolfController:
                 return 
         # elif action == QAction.IGNORE:
         #     return
+
 
         # maybe look for new weapon?
         next = self.determine_next_weapon()
@@ -460,6 +486,24 @@ class ClaretWolfController:
     def explore_map(self):
         # TODO: Check if not going in eapons based on  bot state
         return self.mapping_on_actions[random.choice([Move.UP, Move.UP, Move.RIGHT, Move.LEFT, Move.UP])]
+
+    def read_learned_q_values(self):
+        self.in_learning = False
+
+        self.q_values[(QState(MistDistance.NO_MIST, MistDirection.ANY), QAction.RUN_AWAY)] = 6.8890
+        self.q_values[(QState(MistDistance.NO_MIST, MistDirection.ANY), QAction.IGNORE)] = 43.4367
+        self.q_values[(QState(MistDistance.CLOSE_MIST, MistDirection.SOUTH), QAction.RUN_AWAY)] = 31.5527
+        self.q_values[(QState(MistDistance.CLOSE_MIST, MistDirection.SOUTH), QAction.IGNORE)] = 28.9826
+
+        self.q_values[(QState(MistDistance.CLOSE_MIST, MistDirection.WEST), QAction.RUN_AWAY)] = 5.5076
+        self.q_values[(QState(MistDistance.CLOSE_MIST, MistDirection.WEST), QAction.IGNORE)] = 0.08483
+        self.q_values[(QState(MistDistance.CLOSE_MIST, MistDirection.NORTH), QAction.RUN_AWAY)] = 34.3739
+        self.q_values[(QState(MistDistance.CLOSE_MIST, MistDirection.NORTH), QAction.IGNORE)] = 34.3056
+
+        self.q_values[(QState(MistDistance.CLOSE_MIST, MistDirection.EAST), QAction.RUN_AWAY)] = 17.6982
+        self.q_values[(QState(MistDistance.CLOSE_MIST, MistDirection.EAST), QAction.IGNORE)] = 29.5100
+
+
 
 
 POTENTIAL_CONTROLLERS = [
