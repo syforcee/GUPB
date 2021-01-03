@@ -86,6 +86,7 @@ class ClaretWolfController:
         self.enemies_knowledge = {}
         self.dynamic_obsticles = {}
         self.arena = None
+        self.arena_size = None
         self.bot_position = None
         self.facing = None
         self.enviroment_map = None
@@ -141,6 +142,7 @@ class ClaretWolfController:
             arena = [[self.terrain_mapping(terrain, coordinates.Coords(*(x,y))) for x in range(size[0])] for y in range(size[1])] 
             self.arena = arena
             self.enviroment_map = Grid(matrix=arena)
+            self.arena_size = size
         except:
             pass
 
@@ -188,11 +190,11 @@ class ClaretWolfController:
         closest_alive_enemy = None
         min_distance_to_enemy = neighbourhood_distance
         for k, v in self.enemies_knowledge.items():
-            if v[0].character.health > 0:
+            enemy_health = v[0].character.health
+            if enemy_health > 0 and self.round_health > enemy_health:
                 distance = g_distance(self.bot_position, v[1])
                 closest_alive_enemy = k if distance < min_distance_to_enemy else closest_alive_enemy
                 min_distance_to_enemy = distance if distance < min_distance_to_enemy else min_distance_to_enemy
-
 
         target_position = self.enemies_knowledge[closest_alive_enemy][1] if closest_alive_enemy is not None else None #coord
         return target_position
@@ -279,6 +281,9 @@ class ClaretWolfController:
             self.enqueue_target(next)
 
         # maybe explore DEFAULT
+        if g_distance(self.bot_position, self.menhir_position) < 2:
+            self.queue.append(self.recon())
+            return
 
 
     def enqueue_target(self, target):
@@ -355,16 +360,12 @@ class ClaretWolfController:
 
     def go_to_coords(self, target: coordinates.Coords):
         def create_grid():
-            temp_arena = self.arena.copy()
+            temp_arena = copy.deepcopy(self.arena)
             for w in self.dynamic_obstacles.keys():
-                # print("UPDATING ARENA")
-                # print(w)
                 temp_arena[w[0]][w[1]] = -1
             return Grid(matrix=temp_arena)
 
         self.enviroment_map = create_grid()
-        # self.enviroment_map.cleanup() #cleaning not required
-
         start = self.enviroment_map.node(target[0], target[1])
         end = self.enviroment_map.node(self.bot_position[0], self.bot_position[1])
 
@@ -435,36 +436,6 @@ class ClaretWolfController:
                     return True
         return False
 
-    # def run_away_from_mist(self):
-        # print("BOT POSITION")
-        # print(self.bot_position)
-        # ret_val = self.go_to_coords(self.menhir_position)
-        # print("RETURN TO MENHIR")
-        # print(ret_val)
-        # if g_distance(self.bot_position, self.menhir_position) < 2:
-        #     return self.recon()
-        # else:
-        #     self.last_observed_mist_vec = None
-        #     return self.menhir_position
-        # if self.run_seq_step == 1:
-        #     self.run_seq_step += 1
-        #     if self.is_mist_closer_from_left(): #closer from left
-        #         return self.mapping_on_actions[Move.RIGHT]
-        #     elif self.is_mist_closer_from_right():
-        #         return self.mapping_on_actions[Move.LEFT]
-        #     else: # mist directly in front of bot
-        #         self.is_bot_in_rotation = True
-        #         return self.mapping_on_actions[Move.RIGHT]
-        # elif self.is_bot_in_rotation: #continue rotation
-        #     self.run_seq_step += 2
-        #     self.is_bot_in_rotation = False
-        #     return self.mapping_on_actions[Move.RIGHT]
-        # elif self.run_seq_step > 1 and self.run_seq_step < LONG_SEQ:
-        #     self.run_seq_step += 1
-        #     return self.mapping_on_actions[Move.UP]
-        # else:
-        #     return self.mapping_on_actions[random.choice([Move.UP, Move.UP, Move.RIGHT, Move.LEFT, Move.UP])]
-
     def recon(self):
         return characters.Action.TURN_LEFT
 
@@ -487,7 +458,34 @@ class ClaretWolfController:
 
     def explore_map(self):
         # TODO: Check if not going in eapons based on  bot state
+        def choose_best_direction():
+            temp_arena = copy.deepcopy(self.arena)
+            for w in self.dynamic_obstacles.keys():
+                temp_arena[w[0]][w[1]] = - 0.5
+
+            possible_coordinates = [
+                (self.bot_position[0] - 1, self.bot_position[1]),
+                (self.bot_position[0], self.bot_position[1] - 1),
+                (self.bot_position[0] + 1, self.bot_position[1]),
+                (self.bot_position[0], self.bot_position[1] + 1)
+            ]
+
+            possible_coordinates = [pos for pos in possible_coordinates if (self.arena_size[0] > pos[0] >= 0) and (self.arena_size[1] > pos[1] >= 0) ]
+            possible_destinations = { pos: temp_arena[pos[0]][pos[1]] for pos in possible_coordinates }
+            print("BOT POS")
+            print(self.bot_position)
+            print(possible_destinations)
+
+
+            # possible_moves = [
+            #     temp_arena[self.bot_position[0] - 1][self.bot_position[1]],
+            #     temp_arena[self.bot_position[0]][self.bot_position[1] - 1],
+            #     temp_arena[self.bot_position[0] + 1][self.bot_position[1]],
+            #     temp_arena[self.bot_position[0]][self.bot_position[1] + 1],
+            # ]
+        choose_best_direction()
         return self.mapping_on_actions[random.choice([Move.UP, Move.UP, Move.RIGHT, Move.LEFT, Move.UP])]
+
 
     def read_learned_q_values(self):
         self.in_learning = False
