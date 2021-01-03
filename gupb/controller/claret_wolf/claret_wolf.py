@@ -68,7 +68,7 @@ WEAPONS_DESCRIPTORS = {
 SIGHT_RANGE = 2000
 DANGEROUS_DIST = 1500
 LONG_SEQ = 6
-EXPLORATION_PROB = 0.1
+EXPLORATION_PROB = 0.15
 alpha = 0.5
 gamma = 0
 epsilon = 0.1
@@ -84,7 +84,7 @@ class ClaretWolfController:
         self.weapon = "knife"
         self.weapons_knowledge = {}
         self.enemies_knowledge = {}
-        self.dynamic_obsticles = {}
+        self.dynamic_obstacles = {}
         self.arena = None
         self.arena_size = None
         self.bot_position = None
@@ -143,7 +143,8 @@ class ClaretWolfController:
             self.arena = arena
             self.enviroment_map = Grid(matrix=arena)
             self.arena_size = size
-        except:
+        except Exception as e:
+            # print("Exception" + str(e))
             pass
 
 
@@ -151,6 +152,7 @@ class ClaretWolfController:
         try:
             self.update_bot(knowledge)
             self.update_weapons_knowledge(knowledge)
+
             global counter
             if (counter % 5) == 0:
                 self.update_enemies_knowledge(knowledge)
@@ -168,10 +170,9 @@ class ClaretWolfController:
                 next_move = self.queue.pop(0)
                 return next_move
             else:
-                # print("PERFORMING DEAFULT MOVE")
                 return self.explore_map()
         except Exception as e:
-            #print("EXCEPTION CAUSE = ", e)
+            # print("EXCEPTION CAUSE = ", e)
             return Action.DO_NOTHING
             pass
 
@@ -221,41 +222,13 @@ class ClaretWolfController:
             self.queue.append(characters.Action.ATTACK)
             return
 
-        #Choose action based on Q learning
-        self.find_vector_to_nearest_mist_tile(knowledge)
-        state = determine_state(self.last_observed_mist_vec, self.facing)
-        #print("RPY STATE = ", state)
-        if self.in_learning:
-            (state, action) = learn_actions(state)
+        # maybe near menhir
+        if g_distance(self.bot_position, self.menhir_position) < 2:
+            self.queue.append(self.recon())
+            return
 
-            # print(state)
-            # print(action)
-
-            #Update
-            if self.last_round_health is not None and self.q_learning_state is not None:
-
-                # print("Updating q values")
-
-                (old_state, old_action) = self.q_learning_state
-                reward = 0
-                if self.last_round_health == self.round_health:
-                    reward += 0.5
-                else:
-                    reward += -50
-                # print(reward)
-                if old_action == QAction.RUN_AWAY and old_state.mist_distance == MistDistance.NO_MIST:
-                    reward += -40
-                update_q_values(old_state, old_action, reward, state)
-
-            self.q_learning_state = (state, action)
-
-        else: # for battle only
-            if random.uniform(0, 1) < epsilon:
-                action = random.choice([QAction.RUN_AWAY, QAction.IGNORE])
-            else:
-                action = self.get_best_action_in_state(state)
-
-
+        # mist escape
+        action = self.get_q_learning_action(knowledge)
         # Perform chosen action
         if action == QAction.RUN_AWAY:
             self.queue = []
@@ -263,8 +236,6 @@ class ClaretWolfController:
             if next:
                 self.enqueue_target(next)
                 return 
-        # elif action == QAction.IGNORE:
-        #     return
 
 
         # maybe look for new weapon?
@@ -280,11 +251,38 @@ class ClaretWolfController:
             self.queue = []
             self.enqueue_target(next)
 
-        # maybe explore DEFAULT
-        if g_distance(self.bot_position, self.menhir_position) < 2:
-            self.queue.append(self.recon())
-            return
+        # Explore
+        next = self.choose_best_direction()
+        self.queue = []
+        self.enqueue_target(next)
 
+
+    def get_q_learning_action(self, knowledge: characters.ChampionKnowledge):
+        #Choose action based on Q learning
+        self.find_vector_to_nearest_mist_tile(knowledge)
+        state = determine_state(self.last_observed_mist_vec, self.facing)
+        if self.in_learning:
+            (state, action) = learn_actions(state)
+            #Update
+            if self.last_round_health is not None and self.q_learning_state is not None:
+                (old_state, old_action) = self.q_learning_state
+                reward = 0
+                if self.last_round_health == self.round_health:
+                    reward += 0.5
+                else:
+                    reward += -50
+                if old_action == QAction.RUN_AWAY and old_state.mist_distance == MistDistance.NO_MIST:
+                    reward += -40
+                update_q_values(old_state, old_action, reward, state)
+
+            self.q_learning_state = (state, action)
+
+        else: # for battle only
+            if random.uniform(0, 1) < EXPLORATION_PROB:
+                action = QAction.IGNORE
+            else:
+                action = self.get_best_action_in_state(state)
+        return action
 
     def enqueue_target(self, target):
         next_coords = self.go_to_coords(target)
@@ -343,10 +341,12 @@ class ClaretWolfController:
         weapons = {k: v.loot.name for k, v in weapons.items()}
         for weapon in weapons.items():
             self.weapons_knowledge[weapon[0]] = weapon[1]
-        self.dynamic_obstacles = copy.deepcopy(self.weapons_knowledge)
+
         self.weapons_knowledge = dict(filter(lambda elem: WEAPONS_DESCRIPTORS[elem[1]] > WEAPONS_DESCRIPTORS[self.weapon] and elem[0] != self.bot_position, self.weapons_knowledge.items()))
-        self.dynamic_obstacles = dict(filter(lambda elem: WEAPONS_DESCRIPTORS[elem[1]] <= WEAPONS_DESCRIPTORS[self.weapon] and elem[0] != self.bot_position, self.dynamic_obstacles.items()))
-        
+
+        new_dynamic_obstacles = copy.deepcopy(self.weapons_knowledge)
+        new_dynamic_obstacles = dict(filter(lambda elem: WEAPONS_DESCRIPTORS[elem[1]] <= WEAPONS_DESCRIPTORS[self.weapon] and elem[0] != self.bot_position, new_dynamic_obstacles.items()))
+        self.dynamic_obstacles = {**self.dynamic_obstacles, **new_dynamic_obstacles}
 
     def determine_next_weapon(self):
         temp_weapons_knowledge = dict(filter(lambda elem: WEAPONS_DESCRIPTORS[elem[1]] > WEAPONS_DESCRIPTORS[self.weapon] and elem[1] != self.bot_position, self.weapons_knowledge.items()))
@@ -456,34 +456,51 @@ class ClaretWolfController:
         return self.mapping_on_actions[move]
 
 
+    def choose_best_direction(self):
+        temp_arena = copy.deepcopy(self.arena)
+        for w in self.dynamic_obstacles.keys():
+            temp_arena[w[1]][w[0]] = - 0.5
+        possible_coordinates = [
+            (self.bot_position[0] - 1, self.bot_position[1]),
+            (self.bot_position[0], self.bot_position[1] - 1),
+            (self.bot_position[0] + 1, self.bot_position[1]),
+            (self.bot_position[0], self.bot_position[1] + 1)
+        ]
+
+        possible_coordinates = [pos for pos in possible_coordinates if (self.arena_size[0] > pos[0] >= 0) and (self.arena_size[1] > pos[1] >= 0) ]
+        possible_destinations = { pos: temp_arena[pos[1]][pos[0]] for pos in possible_coordinates }
+        
+        destination = None
+        destination_value = -2
+        for k, v in possible_destinations.items():
+            if v > destination_value:
+                destination = k
+                destination_value = v
+
+        # print("BOT POS")
+        # print(self.bot_position)
+
+        # print(possible_destinations)
+        # print("DESTINATION")
+        # print(destination)
+
+        # print(self.dynamic_obstacles)
+        return destination
+
+        # with open('test.txt', 'w') as outfile:
+        #     for row_index in range(len(temp_arena)):
+        #         for col_index in range(len(temp_arena[0])):
+        #             value = temp_arena[row_index][col_index]
+        #             if value == -1:
+        #                 outfile.write('.')
+        #             if value == 1:
+        #                 outfile.write(' ')        
+        #             if value == 0.5:
+        #                 outfile.write('*')      
+        #         outfile.write('\n')      
+
     def explore_map(self):
         # TODO: Check if not going in eapons based on  bot state
-        def choose_best_direction():
-            temp_arena = copy.deepcopy(self.arena)
-            for w in self.dynamic_obstacles.keys():
-                temp_arena[w[0]][w[1]] = - 0.5
-
-            possible_coordinates = [
-                (self.bot_position[0] - 1, self.bot_position[1]),
-                (self.bot_position[0], self.bot_position[1] - 1),
-                (self.bot_position[0] + 1, self.bot_position[1]),
-                (self.bot_position[0], self.bot_position[1] + 1)
-            ]
-
-            possible_coordinates = [pos for pos in possible_coordinates if (self.arena_size[0] > pos[0] >= 0) and (self.arena_size[1] > pos[1] >= 0) ]
-            possible_destinations = { pos: temp_arena[pos[0]][pos[1]] for pos in possible_coordinates }
-            print("BOT POS")
-            print(self.bot_position)
-            print(possible_destinations)
-
-
-            # possible_moves = [
-            #     temp_arena[self.bot_position[0] - 1][self.bot_position[1]],
-            #     temp_arena[self.bot_position[0]][self.bot_position[1] - 1],
-            #     temp_arena[self.bot_position[0] + 1][self.bot_position[1]],
-            #     temp_arena[self.bot_position[0]][self.bot_position[1] + 1],
-            # ]
-        choose_best_direction()
         return self.mapping_on_actions[random.choice([Move.UP, Move.UP, Move.RIGHT, Move.LEFT, Move.UP])]
 
 
